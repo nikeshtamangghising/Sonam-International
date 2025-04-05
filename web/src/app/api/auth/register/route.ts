@@ -1,111 +1,78 @@
-import { NextRequest, NextResponse } from 'next/server';
-
-// Mock user data for development (same as in login route)
-const mockUsers = [
-  {
-    id: 'user-1',
-    email: 'john.doe@example.com',
-    password: 'password123', // In a real app, this would be hashed
-    first_name: 'John',
-    last_name: 'Doe',
-    phone: '+1234567890',
-    status: 'active',
-    role: 'customer',
-    profile: {
-      id: 'profile-1',
-      profile_picture: '/images/users/john-doe.jpg',
-      date_of_birth: '1990-01-01',
-      gender: 'male',
-      marketing_consent: true,
-    },
-    addresses: [
-      {
-        id: 'address-1',
-        address_type: 'shipping',
-        is_default: true,
-        first_name: 'John',
-        last_name: 'Doe',
-        address_line1: '123 Main St',
-        city: 'New York',
-        state: 'NY',
-        postal_code: '10001',
-        country: 'US',
-        phone: '+1234567890',
-      }
-    ],
-    created_at: '2023-01-01T00:00:00Z',
-    updated_at: '2023-01-01T00:00:00Z',
-    last_login: '2023-04-01T12:00:00Z',
-  }
-];
+import { NextRequest, NextResponse } from "next/server";
+import { UserService } from "@/lib/services/user-service";
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, first_name, last_name, phone } = await request.json();
-    
+    const { first_name, last_name, email, password, phone } = await request.json();
+
     // Validate input
-    if (!email || !password || !first_name || !last_name) {
+    if (!first_name || !last_name || !email || !password) {
       return NextResponse.json(
-        { error: 'Email, password, first name, and last name are required' },
+        { error: "Missing required fields" },
         { status: 400 }
       );
     }
-    
-    // Check if email is already in use
-    const existingUser = mockUsers.find(u => u.email === email);
-    if (existingUser) {
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { error: 'Email is already in use' },
-        { status: 409 }
+        { error: "Invalid email format" },
+        { status: 400 }
       );
     }
-    
-    // In a real app, we would hash the password and save the user to the database
-    const newUser = {
-      id: `user-${Date.now()}`,
-      email,
-      password, // In a real app, this would be hashed
-      first_name,
-      last_name,
-      phone,
-      status: 'active',
-      role: 'customer',
-      profile: {
-        id: `profile-${Date.now()}`,
+
+    // Validate password length
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: "Password must be at least 8 characters long" },
+        { status: 400 }
+      );
+    }
+
+    try {
+      // Create user
+      const user = await UserService.createUser({
+        email,
+        password,
+        first_name,
+        last_name,
+        phone,
+      });
+
+      // Create default profile
+      await UserService.createOrUpdateProfile(user.id, {
         marketing_consent: false,
-      },
-      addresses: [],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    
-    // In a real app, we would generate a JWT token here
-    const token = 'mock-jwt-token';
-    
-    // Remove sensitive information before returning user data
-    const { password: _, ...userWithoutPassword } = newUser;
-    
-    // Set cookie with token
-    const response = NextResponse.json({
-      user: userWithoutPassword,
-      token
-    }, { status: 201 });
-    
-    response.cookies.set({
-      name: 'auth_token',
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
-      path: '/',
-    });
-    
-    return response;
-  } catch (error) {
-    console.error('Registration error:', error);
+      });
+
+      // Return success response
+      return NextResponse.json(
+        {
+          message: "User registered successfully",
+          user: {
+            id: user.id,
+            email: user.email,
+            first_name: user.first_name,
+            last_name: user.last_name,
+          },
+        },
+        { status: 201 }
+      );
+    } catch (err: any) {
+      // Handle duplicate email error
+      if (err.message === "User with this email already exists") {
+        return NextResponse.json(
+          { error: "Email is already in use" },
+          { status: 409 }
+        );
+      }
+      throw err;
+    }
+  } catch (error: any) {
+    console.error("Registration error:", error);
+
     return NextResponse.json(
-      { error: 'Registration failed' },
+      { error: "Registration failed" },
       { status: 500 }
     );
   }
